@@ -1,0 +1,5 @@
+API_KEY = ""
+API_SECRET = ""
+
+TELEGRAM_TOKEN = ""
+CHAT_ID = ""
