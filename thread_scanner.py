@@ -3,8 +3,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import config
 
 from binance_api import get_klines
-from indicators import analyze_symbol
 
+from indicators import analyze_indicators
+from signal_score import calculate_signal_score
+from volume_filter import volume_spike
+
+
+# ==========================================================
+# Scan 1 symbol
+# ==========================================================
 
 def scan_symbol(symbol, timeframe):
 
@@ -13,32 +20,60 @@ def scan_symbol(symbol, timeframe):
         klines = get_klines(
             symbol=symbol,
             interval=timeframe,
-            limit=200
+            limit=250
         )
 
-        data = analyze_symbol(klines)
+        if not klines:
+            return None
 
-        data["symbol"] = symbol
-        data["timeframe"] = timeframe
+        indicator = analyze_indicators(klines)
 
-        return data
+        if indicator is None:
+            return None
+
+        signal = calculate_signal_score(indicator)
+
+        result = {
+
+            "symbol": symbol,
+
+            "timeframe": timeframe,
+
+            "indicator": indicator,
+
+            "signal": signal,
+
+            "volume_spike": volume_spike(indicator),
+
+        }
+
+        return result
 
     except Exception as e:
 
-        print(symbol, e)
+        print(f"[ERROR] {symbol}: {e}")
 
         return None
 
 
+# ==========================================================
+# Parallel Scanner
+# ==========================================================
+
 def scan_parallel(symbols, timeframe):
 
     results = []
+
+    total = len(symbols)
+
+    completed = 0
 
     with ThreadPoolExecutor(
         max_workers=config.MAX_WORKERS
     ) as executor:
 
         futures = {
+
             executor.submit(
                 scan_symbol,
                 symbol,
@@ -46,11 +81,8 @@ def scan_parallel(symbols, timeframe):
             ): symbol
 
             for symbol in symbols
+
         }
-
-        total = len(futures)
-
-        completed = 0
 
         for future in as_completed(futures):
 
@@ -58,12 +90,28 @@ def scan_parallel(symbols, timeframe):
 
             symbol = futures[future]
 
-            print(f"[{completed}/{total}] {symbol}")
+            print(
+                f"[{completed}/{total}] "
+                f"{symbol} "
+                f"({timeframe})"
+            )
 
-            result = future.result()
+            try:
 
-            if result:
+                result = future.result()
 
-                results.append(result)
+                if result:
+
+                    results.append(result)
+
+            except Exception as e:
+
+                print(
+
+                    f"[THREAD ERROR] "
+
+                    f"{symbol}: {e}"
+
+                )
 
     return results

@@ -3,124 +3,127 @@ from datetime import datetime
 
 import config
 
-from filters import filter_signals
-from notifier import should_notify
 
-
-# ===================================
-# Gửi 1 tin nhắn Telegram
-# ===================================
+# ==========================================================
+# Gửi Telegram
+# ==========================================================
 
 def send_message(message):
 
     url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/sendMessage"
 
-    response = requests.post(
+    requests.post(
+
         url,
+
         data={
+
             "chat_id": config.CHAT_ID,
+
             "text": message,
+
             "parse_mode": "HTML"
+
         }
-    )
 
-    if response.status_code != 200:
-        print("Lỗi gửi Telegram:", response.text)
-
-
-# ===================================
-# Định dạng 1 tín hiệu
-# ===================================
-
-def format_signal(coin):
-
-    trend_icon = {
-        "UP": "📈",
-        "DOWN": "📉",
-        "SIDEWAYS": "➡️"
-    }
-
-    return (
-        f"<b>{coin['symbol']}</b>\n"
-        f"💰 Giá: <b>{coin['price']}</b>\n"
-        f"📊 RSI: <b>{coin['rsi']}</b>\n"
-        f"{trend_icon.get(coin['trend'],'➡️')} Xu hướng: <b>{coin['trend']}</b>\n"
-        f"⭐ Điểm: <b>{coin['score']}/100</b>\n"
-        f"⏰ Khung: <b>{coin['timeframe']}</b>"
     )
 
 
-# ===================================
+# ==========================================================
+# Format BUY / SELL
+# ==========================================================
+
+def format_signal(result):
+
+    indicator = result["indicator"]
+
+    trend = result["trend"]
+
+    direction = result["direction"]
+
+    score = result["score"]
+
+    if direction == "BUY":
+
+        icon = "🟢"
+
+    else:
+
+        icon = "🔴"
+
+    volume = "YES" if result["volume_spike"] else "NO"
+
+    message = f"""
+{icon} <b>{direction}</b>
+
+<b>{result['symbol']}</b>
+
+💰 Price : <b>{indicator['price']:.6f}</b>
+
+⭐ Score : <b>{score}/10</b>
+
+⏰ TF : <b>{result['timeframe']}</b>
+
+━━━━━━━━━━━━━━
+
+📊 RSI : <b>{indicator['rsi']:.2f}</b>
+
+📈 ADX : <b>{indicator['adx']:.2f}</b>
+
+📦 Volume Spike : <b>{volume}</b>
+
+━━━━━━━━━━━━━━
+
+📈 Trend 15m : <b>{trend['trend_15m']}</b>
+
+📈 Trend 1H : <b>{trend['trend_1h']}</b>
+
+📈 Trend 4H : <b>{trend['trend_4h']}</b>
+
+━━━━━━━━━━━━━━
+
+EMA20 : {indicator['ema20']:.4f}
+
+EMA50 : {indicator['ema50']:.4f}
+
+EMA200 : {indicator['ema200']:.4f}
+
+━━━━━━━━━━━━━━
+
+<b>Conditions</b>
+
+{", ".join(result["details"])}
+
+━━━━━━━━━━━━━━
+
+🕒 {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
+"""
+
+    return message
+
+
+# ==========================================================
 # Gửi danh sách tín hiệu
-# ===================================
+# ==========================================================
 
 def send_signals(results):
 
-    buy_signals, sell_signals = filter_signals(results)
+    if len(results) == 0:
 
-    buy_list = []
-
-    sell_list = []
-
-    # BUY
-    for coin in buy_signals:
-
-        if not should_notify(coin):
-            continue
-
-        buy_list.append(format_signal(coin))
-
-    # SELL
-    for coin in sell_signals:
-
-        if not should_notify(coin):
-            continue
-
-        sell_list.append(format_signal(coin))
-
-    if len(buy_list) == 0 and len(sell_list) == 0:
-
-        print("Không có tín hiệu mới.")
+        print("Không có tín hiệu.")
 
         return
 
-    message = "📊 <b>BINANCE SCANNER PRO V2</b>\n"
+    print(f"Gửi {len(results)} tín hiệu...")
 
-    message += f"🕒 {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n\n"
+    for signal in results:
 
-    # BUY
-    if buy_list:
+        try:
 
-        message += (
-            f"🟢 <b>BUY SIGNALS ({len(buy_list)})</b>\n"
-            "━━━━━━━━━━━━━━━━━━\n\n"
-        )
+            message = format_signal(signal)
 
-        message += "\n\n".join(buy_list)
+            send_message(message)
 
-        message += "\n\n"
+        except Exception as e:
 
-    # SELL
-    if sell_list:
-
-        message += (
-            f"🔴 <b>SELL SIGNALS ({len(sell_list)})</b>\n"
-            "━━━━━━━━━━━━━━━━━━\n\n"
-        )
-
-        message += "\n\n".join(sell_list)
-
-        message += "\n\n"
-
-    message += "━━━━━━━━━━━━━━━━━━\n"
-
-    message += (
-        f"📈 BUY : {len(buy_list)}\n"
-        f"📉 SELL : {len(sell_list)}"
-    )
-
-    # Telegram giới hạn khoảng 4096 ký tự/tin nhắn
-    if len(message) > 4000:
-        message = message[:3900] + "\n\n... (Còn nhiều tín hiệu khác)"
-
-    send_message(message)
+            print(e)

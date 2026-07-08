@@ -48,3 +48,5 @@ def get_price(symbol):
     ticker = client.get_symbol_ticker(symbol=symbol)
 
     return float(ticker["price"])
+def get_all_tickers():
+    return client.get_ticker()

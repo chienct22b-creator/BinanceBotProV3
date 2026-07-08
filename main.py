@@ -1,39 +1,86 @@
 import time
 from datetime import datetime
 
+import config
+
 from scanner import scan_market
 from telegram_bot import send_signals
 
 
+# ==========================================================
+# Banner
+# ==========================================================
+
+def banner():
+
+    print("=" * 70)
+    print("🚀 BinanceBotPro V3")
+    print("📈 Multi-Timeframe Crypto Scanner")
+    print("=" * 70)
+    print(f"⏱ Scan Interval : {config.SCAN_INTERVAL}s")
+    print(f"📊 Max Symbols   : {config.MAX_SYMBOLS}")
+    print(f"⭐ Min Score     : {config.MIN_SCORE}/10")
+    print(f"🧵 Threads       : {config.MAX_WORKERS}")
+    print("=" * 70)
+
+
+# ==========================================================
+# Main Loop
+# ==========================================================
+
 def main():
 
-    print("=" * 60)
-    print("🚀 BinanceBotProV2 Started")
-    print("=" * 60)
+    banner()
 
     while True:
+
+        start = time.time()
 
         try:
 
             print()
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Đang quét thị trường...")
+            print(
+                f"[{datetime.now().strftime('%H:%M:%S')}] "
+                "Đang quét thị trường..."
+            )
 
             results = scan_market()
 
-            print(f"Đã phân tích {len(results)} tín hiệu")
+            print(
+                f"✅ Tìm thấy {len(results)} tín hiệu."
+            )
 
-            send_signals(results)
+            if results:
 
-            print("✅ Hoàn thành.")
+                send_signals(results)
+
+            else:
+
+                print("Không có tín hiệu phù hợp.")
+
+        except KeyboardInterrupt:
+
+            print("\nĐã dừng bot.")
+
+            break
 
         except Exception as e:
 
-            print("Lỗi:", e)
+            print(f"\n❌ Lỗi: {e}")
 
-        print("⏳ Đợi 5 phút...\n")
+        elapsed = time.time() - start
 
-        time.sleep(300)
+        print(f"⏱ Thời gian quét: {elapsed:.2f} giây")
 
+        print(
+            f"⏳ Chờ {config.SCAN_INTERVAL} giây...\n"
+        )
+
+        time.sleep(config.SCAN_INTERVAL)
+
+
+# ==========================================================
 
 if __name__ == "__main__":
+
     main()
