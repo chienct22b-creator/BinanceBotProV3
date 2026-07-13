@@ -1,6 +1,7 @@
+from trade_planner import calculate_trade_plan
+
 from binance_api import get_all_tickers
 from volume_filter import top_symbols
-
 from thread_scanner import scan_parallel
 
 from trend_filter import (
@@ -29,9 +30,9 @@ def scan_market():
 
     tf_data = {}
 
-    # ===============================
+    # ==========================================
     # Scan từng timeframe
-    # ===============================
+    # ==========================================
 
     for tf in config.TIMEFRAMES:
 
@@ -42,39 +43,19 @@ def scan_market():
             tf,
         )
 
-    # ===============================
-    # Chuyển thành dictionary
-    # ===============================
+    # ==========================================
+    # Dictionary
+    # ==========================================
 
-    tf15 = {
-
-        x["symbol"]: x
-
-        for x in tf_data["15m"]
-
-    }
-
-    tf1h = {
-
-        x["symbol"]: x
-
-        for x in tf_data["1h"]
-
-    }
-
-    tf4h = {
-
-        x["symbol"]: x
-
-        for x in tf_data["4h"]
-
-    }
+    tf15 = {x["symbol"]: x for x in tf_data["15m"]}
+    tf1h = {x["symbol"]: x for x in tf_data["1h"]}
+    tf4h = {x["symbol"]: x for x in tf_data["4h"]}
 
     results = []
 
-    # ===============================
+    # ==========================================
     # Ghép dữ liệu
-    # ===============================
+    # ==========================================
 
     for symbol in symbols:
 
@@ -88,24 +69,19 @@ def scan_market():
             continue
 
         indicator15 = tf15[symbol]["indicator"]
-
         indicator1h = tf1h[symbol]["indicator"]
-
         indicator4h = tf4h[symbol]["indicator"]
 
         trend = check_trend(
-
             indicator15,
-
             indicator1h,
-
             indicator4h,
-
         )
 
         signal = tf15[symbol]["signal"]
 
         direction = signal["direction"]
+
         if direction == "NONE":
             continue
 
@@ -113,6 +89,10 @@ def scan_market():
 
         if score < config.MIN_SCORE:
             continue
+
+        # ==========================================
+        # Trend Filter
+        # ==========================================
 
         if direction == "BUY":
 
@@ -130,21 +110,35 @@ def scan_market():
             if not allow_sell(trend):
                 continue
 
-        if not should_notify(
+        # ==========================================
+        # Trade Planner
+        # ==========================================
 
-            symbol,
-
-            "15m",
-
+        trade_plan = calculate_trade_plan(
+            indicator15,
             direction,
+        )
 
-            score,
-
-            cooldown=config.COOLDOWN_MINUTES,
-
-        ):
-
+        # RR thấp thì bỏ
+        if not trade_plan["valid"]:
             continue
+
+        # ==========================================
+        # Cooldown
+        # ==========================================
+
+        if not should_notify(
+            symbol,
+            "15m",
+            direction,
+            score,
+            cooldown=config.COOLDOWN_MINUTES,
+        ):
+            continue
+
+        # ==========================================
+        # Kết quả
+        # ==========================================
 
         results.append({
 
@@ -166,8 +160,24 @@ def scan_market():
 
             "volume_spike": tf15[symbol]["volume_spike"],
 
+            # Trade Planner
+            "trade_plan": trade_plan,
+
         })
 
     print(f"\nTìm thấy {len(results)} tín hiệu")
+
+    # Debug (có thể xóa sau)
+
+    for r in results:
+
+        plan = r["trade_plan"]
+
+        print(
+            f'{r["symbol"]} | '
+            f'{r["direction"]} | '
+            f'Score:{r["score"]} | '
+            f'RR:{plan["rr"]}'
+        )
 
     return results
