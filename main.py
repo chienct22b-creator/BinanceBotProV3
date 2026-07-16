@@ -1,10 +1,18 @@
+import threading
 import time
 from datetime import datetime
 
 import config
 
+from database import init_database
 from scanner import scan_market
 from telegram_bot import send_signals
+from telegram_listener import check_commands
+from trade_tracker import check_open_trades
+from stats import send_daily_report
+
+
+last_report_day = None
 
 
 # ==========================================================
@@ -14,7 +22,7 @@ from telegram_bot import send_signals
 def banner():
 
     print("=" * 70)
-    print("🚀 BinanceBotPro V3")
+    print("🚀 BinanceBotPro V3.3")
     print("📈 Multi-Timeframe Crypto Scanner")
     print("=" * 70)
     print(f"⏱ Scan Interval : {config.SCAN_INTERVAL}s")
@@ -25,12 +33,45 @@ def banner():
 
 
 # ==========================================================
+# Telegram Listener
+# ==========================================================
+
+def telegram_loop():
+
+    print("🤖 Telegram Listener Started")
+
+    while True:
+
+        try:
+
+            check_commands()
+
+        except Exception as e:
+
+            print(f"[Telegram] {e}")
+
+        time.sleep(2)
+
+
+# ==========================================================
 # Main Loop
 # ==========================================================
 
 def main():
 
+    global last_report_day
+
+    init_database()
+
     banner()
+
+    # Khởi động Telegram Listener
+    telegram_thread = threading.Thread(
+        target=telegram_loop,
+        daemon=True
+    )
+
+    telegram_thread.start()
 
     while True:
 
@@ -58,9 +99,25 @@ def main():
 
                 print("Không có tín hiệu phù hợp.")
 
+            # Theo dõi các lệnh đang mở
+            check_open_trades()
+
+            # Báo cáo cuối ngày
+            now = datetime.now()
+
+            if now.hour == 23 and now.minute >= 59:
+
+                if last_report_day != now.date():
+
+                    print("📊 Gửi báo cáo cuối ngày...")
+
+                    send_daily_report()
+
+                    last_report_day = now.date()
+
         except KeyboardInterrupt:
 
-            print("\nĐã dừng bot.")
+            print("\n🛑 Đã dừng bot.")
 
             break
 

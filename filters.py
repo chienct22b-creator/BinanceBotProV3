@@ -1,9 +1,19 @@
+"""
+====================================================
+BinanceBotPro V3.2
+Signal Filter
+====================================================
+"""
+
+import config
+
+
 def is_buy_signal(coin):
 
-    if coin["score"] < 70:
+    if coin["score"] < config.MIN_SCORE:
         return False
 
-    if coin["signal_type"] != "BUY":
+    if coin["direction"] != "BUY":
         return False
 
     return True
@@ -11,10 +21,10 @@ def is_buy_signal(coin):
 
 def is_sell_signal(coin):
 
-    if coin["score"] < 70:
+    if coin["score"] < config.MIN_SCORE:
         return False
 
-    if coin["signal_type"] != "SELL":
+    if coin["direction"] != "SELL":
         return False
 
     return True

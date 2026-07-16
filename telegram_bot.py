@@ -4,7 +4,7 @@ from datetime import datetime
 import config
 
 from filters import filter_signals
-from notifier import should_notify
+from database import save_trade
 
 
 # ======================================================
@@ -73,6 +73,8 @@ def trend_icon(trend):
 
         "DOWN": "📉",
 
+        "SIDEWAY": "➡️",
+
         "SIDEWAYS": "➡️",
 
     }
@@ -102,83 +104,171 @@ def format_signal(coin):
     plan = coin["trade_plan"]
 
     indicators = " • ".join(
+
         coin["details"]
+
     )
+
+    trend = coin["trend"]
+
+    if isinstance(trend, dict):
+
+        trend_text = trend.get(
+
+            "trend_4h",
+
+            "UNKNOWN"
+
+        )
+
+        strength = trend.get(
+
+            "strength_4h",
+
+            ""
+
+        )
+
+        confirmed = trend.get(
+
+            "confirmed",
+
+            False
+
+        )
+
+    else:
+
+        trend_text = str(trend)
+
+        strength = ""
+
+        confirmed = True
 
     text = ""
 
     text += (
+
         f"{direction_icon(coin['direction'])} "
+
         f"<b>{coin['direction']} {coin['symbol']}</b>\n\n"
+
     )
 
     text += (
+
         f"🏅 Quality : <b>{get_quality(coin['score'])}</b>\n"
+
     )
 
     text += (
+
         f"⭐ Score : <b>{coin['score']}/10</b>\n"
+
     )
 
     text += (
-        f"{trend_icon(coin['trend'])} "
-        f"Trend : <b>{coin['trend']}</b>\n\n"
+
+        f"{trend_icon(trend_text)} "
+
+        f"Trend : <b>{trend_text}</b>\n"
+
     )
 
-    text += (
-        f"💰 Price : <b>{coin['price']}</b>\n"
-    )
-
-    text += (
-        f"📏 ATR : <b>{coin['indicator']['atr']:.4f}</b>\n\n"
-    )
-
-    text += (
-        "🎯 <b>ENTRY</b>\n"
-    )
-
-    text += (
-        f"{plan['entry_low']}  ➜  {plan['entry_high']}\n\n"
-    )
-
-    text += (
-        "🛑 <b>STOP LOSS</b>\n"
-    )
-
-    text += (
-        f"{plan['sl']}\n\n"
-    )
-
-    text += (
-        "🎯 <b>TAKE PROFIT</b>\n"
-    )
-
-    text += (
-        f"TP1 : {plan['tp1']}\n"
-    )
-
-    text += (
-        f"TP2 : {plan['tp2']}\n"
-    )
-
-    text += (
-        f"TP3 : {plan['tp3']}\n\n"
-    )
-
-    text += (
-        f"⚖️ RR : <b>1 : {plan['rr']}</b>\n"
-    )
-
-    if coin["volume_spike"]:
+    if strength:
 
         text += (
+
+            f"💪 Strength : <b>{strength}</b>\n"
+
+        )
+
+    text += (
+
+        f"✅ Confirmed : <b>{confirmed}</b>\n\n"
+
+    )
+
+    text += (
+
+        f"💰 Price : <b>{coin['price']:.6f}</b>\n"
+
+    )
+
+    text += (
+
+        f"📏 ATR : <b>{coin['indicator']['atr']:.6f}</b>\n\n"
+
+    )
+
+    text += (
+
+        "🎯 <b>ENTRY ZONE</b>\n"
+
+    )
+
+    text += (
+
+        f"{plan['entry_low']:.6f} ➜ {plan['entry_high']:.6f}\n\n"
+
+    )
+
+    text += (
+
+        "🛑 <b>STOP LOSS</b>\n"
+
+    )
+
+    text += (
+
+        f"{plan['sl']:.6f}\n\n"
+
+    )
+
+    text += (
+
+        "🎯 <b>TAKE PROFIT</b>\n"
+
+    )
+
+    text += (
+
+        f"TP1 : {plan['tp1']:.6f}\n"
+
+    )
+
+    text += (
+
+        f"TP2 : {plan['tp2']:.6f}\n"
+
+    )
+
+    text += (
+
+        f"TP3 : {plan['tp3']:.6f}\n\n"
+
+    )
+
+    text += (
+
+        f"⚖️ RR : <b>1 : {plan['rr']}</b>\n"
+
+    )
+
+    if coin.get("volume_spike"):
+
+        text += (
+
             "📦 Volume Spike\n"
+
         )
 
     text += "\n"
 
     text += (
-        f"📋 Indicators\n"
+
+        "📋 Indicators\n"
+
     )
 
     text += indicators
@@ -194,37 +284,43 @@ def send_signals(results):
 
     buy_signals, sell_signals = filter_signals(results)
 
-    buy_list = []
+    print(f"results: {len(results)}")
+    print(f"buy_signals: {len(buy_signals)}")
+    print(f"sell_signals: {len(sell_signals)}")
 
+    buy_list = []
     sell_list = []
 
+    # ==========================================
     # BUY
+    # ==========================================
 
     for coin in buy_signals:
 
-        if not should_notify(coin):
+        print("[BUY]", coin)
 
-            continue
+        save_trade(coin)
 
         buy_list.append(
-
             format_signal(coin)
-
         )
 
+    # ==========================================
     # SELL
+    # ==========================================
 
     for coin in sell_signals:
 
-        if not should_notify(coin):
+        print("[SELL]", coin)
 
-            continue
+        save_trade(coin)
 
         sell_list.append(
-
             format_signal(coin)
-
         )
+
+    print(f"buy_list: {len(buy_list)}")
+    print(f"sell_list: {len(sell_list)}")
 
     if len(buy_list) == 0 and len(sell_list) == 0:
 
@@ -232,68 +328,98 @@ def send_signals(results):
 
         return
 
-    message = ""
+    # ==========================================
+    # Header
+    # ==========================================
 
-    message += (
-        "🚀 <b>BINANCE BOT PRO V3.1</b>\n"
+    header = ""
+
+    header += (
+        "🚀 <b>BINANCE BOT PRO V3.2</b>\n"
     )
 
-    message += (
-        datetime.now().strftime(
-            "🕒 %d/%m/%Y %H:%M:%S\n\n"
-        )
+    header += datetime.now().strftime(
+        "🕒 %d/%m/%Y %H:%M:%S\n\n"
     )
+
+    # ==========================================
+    # Nội dung
+    # ==========================================
+
+    sections = []
 
     if buy_list:
 
-        message += (
+        text = ""
+
+        text += (
             f"🟢 <b>BUY ({len(buy_list)})</b>\n"
         )
 
-        message += (
-            "━━━━━━━━━━━━━━━━━━\n\n"
+        text += (
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
         )
 
-        message += "\n\n".join(
-            buy_list
-        )
+        text += "\n\n".join(buy_list)
 
-        message += "\n\n"
+        sections.append(text)
 
     if sell_list:
 
-        message += (
+        text = ""
+
+        text += (
             f"🔴 <b>SELL ({len(sell_list)})</b>\n"
         )
 
-        message += (
-            "━━━━━━━━━━━━━━━━━━\n\n"
+        text += (
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
         )
 
-        message += "\n\n".join(
-            sell_list
-        )
+        text += "\n\n".join(sell_list)
 
-        message += "\n\n"
+        sections.append(text)
 
-    message += (
-        "━━━━━━━━━━━━━━━━━━\n"
+    footer = ""
+
+    footer += "\n\n"
+
+    footer += (
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
     )
 
-    message += (
+    footer += (
         f"🟢 BUY : {len(buy_list)}\n"
     )
 
-    message += (
-        f"🔴 SELL : {len(sell_list)}"
+    footer += (
+        f"🔴 SELL : {len(sell_list)}\n"
     )
 
-    # Telegram giới hạn khoảng 4096 ký tự
-    if len(message) > 4000:
+    footer += (
+        f"📊 TOTAL : {len(results)}"
+    )
 
-        message = (
-            message[:3900]
-            + "\n\n...(Còn nhiều tín hiệu)"
-        )
+    # ==========================================
+    # Telegram giới hạn 4096 ký tự
+    # ==========================================
 
-    send_message(message)
+    current = header
+
+    for section in sections:
+
+        if len(current) + len(section) + len(footer) > 3900:
+
+            current += footer
+
+            send_message(current)
+
+            current = header
+
+        current += section + "\n\n"
+
+    current += footer
+
+    send_message(current)
+
+    print("✅ Đã gửi Telegram.")
