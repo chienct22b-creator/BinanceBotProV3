@@ -19,6 +19,9 @@ from telegram_commands import (
     command_ping,
     command_status,
     command_db,
+    command_pending,
+    command_closed,
+    command_version,
 )
 
 # ==================================================
@@ -109,6 +112,18 @@ def handle_command(text):
     elif text == "/help":
 
         send_message(command_help())
+
+    elif text == "/pending":
+
+        send_message(command_pending())
+
+    elif text == "/closed":
+
+        send_message(command_closed())
+        
+    elif text == "/version":
+
+        send_message(command_version())
 
     else:
 

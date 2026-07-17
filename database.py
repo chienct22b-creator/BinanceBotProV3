@@ -1,7 +1,8 @@
 """
 ====================================================
-BinanceBotPro V3.2
+BinanceBotPro V3.4.0
 Database Engine
+Trade Lifecycle Edition
 ====================================================
 """
 
@@ -10,13 +11,59 @@ from datetime import datetime
 
 DB_NAME = "trades.db"
 
+# ==================================================
+# Trade Status
+# ==================================================
+
+PENDING = "PENDING"      # Chưa khớp Entry
+OPEN = "OPEN"            # Đã khớp Entry
+CLOSED = "CLOSED"        # Hoàn thành
+STOPPED = "STOPPED"      # Stop Loss
+EXPIRED = "EXPIRED"      # Hết hạn
+
 
 # ==================================================
-# Kết nối
+# Kết nối Database
 # ==================================================
 
 def get_connection():
-    return sqlite3.connect(DB_NAME)
+
+    conn = sqlite3.connect(DB_NAME)
+
+    conn.row_factory = sqlite3.Row
+
+    return conn
+
+
+# ==================================================
+# Thêm cột nếu chưa tồn tại
+# ==================================================
+
+def add_column_if_not_exists(conn, table, column, column_type):
+
+    cursor = conn.cursor()
+
+    cursor.execute(f"PRAGMA table_info({table})")
+
+    cols = [c[1] for c in cursor.fetchall()]
+
+    if column not in cols:
+
+        print(f"[DB] Add column: {column}")
+
+        cursor.execute(
+
+            f"""
+
+            ALTER TABLE {table}
+
+            ADD COLUMN {column} {column_type}
+
+            """
+
+        )
+
+        conn.commit()
 
 
 # ==================================================
@@ -26,9 +73,11 @@ def get_connection():
 def init_database():
 
     conn = get_connection()
+
     cur = conn.cursor()
 
     cur.execute("""
+
     CREATE TABLE IF NOT EXISTS trades(
 
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,6 +94,10 @@ def init_database():
 
         entry REAL,
 
+        entry_low REAL,
+
+        entry_high REAL,
+
         sl REAL,
 
         tp1 REAL,
@@ -55,7 +108,7 @@ def init_database():
 
         rr REAL,
 
-        status TEXT,
+        status TEXT DEFAULT 'PENDING',
 
         tp_level INTEGER DEFAULT 0,
 
@@ -63,17 +116,48 @@ def init_database():
 
         close_price REAL,
 
-        close_time TEXT
+        filled_price REAL,
+
+        filled_time TEXT,
+
+        close_time TEXT,
+
+        expired_time TEXT,
+
+        tp1_hit INTEGER DEFAULT 0,
+
+        tp2_hit INTEGER DEFAULT 0,
+
+        tp3_hit INTEGER DEFAULT 0,
+
+        sl_hit INTEGER DEFAULT 0
 
     )
+
     """)
 
+    # =============================================
+    # Auto Upgrade Database
+    # =============================================
+
+    add_column_if_not_exists(conn, "trades", "entry_low", "REAL")
+    add_column_if_not_exists(conn, "trades", "entry_high", "REAL")
+
+    add_column_if_not_exists(conn, "trades", "filled_price", "REAL")
+    add_column_if_not_exists(conn, "trades", "filled_time", "TEXT")
+    add_column_if_not_exists(conn, "trades", "expired_time", "TEXT")
+
+    add_column_if_not_exists(conn, "trades", "tp1_hit", "INTEGER DEFAULT 0")
+    add_column_if_not_exists(conn, "trades", "tp2_hit", "INTEGER DEFAULT 0")
+    add_column_if_not_exists(conn, "trades", "tp3_hit", "INTEGER DEFAULT 0")
+
+    add_column_if_not_exists(conn, "trades", "sl_hit", "INTEGER DEFAULT 0")
+
     conn.commit()
+
     conn.close()
-
-
 # ==================================================
-# Kiểm tra trùng
+# Kiểm tra lệnh đã tồn tại
 # ==================================================
 
 def trade_exists(symbol, direction):
@@ -81,20 +165,27 @@ def trade_exists(symbol, direction):
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute(
-        """
-        SELECT id
+    cur.execute("""
 
-        FROM trades
+    SELECT id
 
-        WHERE symbol=?
-        AND direction=?
-        AND status='OPEN'
+    FROM trades
 
-        LIMIT 1
-        """,
-        (symbol, direction)
-    )
+    WHERE symbol=?
+      AND direction=?
+      AND status IN ('PENDING','OPEN')
+
+    LIMIT 1
+
+    """,
+
+    (
+
+        symbol,
+
+        direction
+
+    ))
 
     row = cur.fetchone()
 
@@ -104,7 +195,7 @@ def trade_exists(symbol, direction):
 
 
 # ==================================================
-# Lưu lệnh
+# Lưu tín hiệu mới
 # ==================================================
 
 def save_trade(signal):
@@ -115,17 +206,20 @@ def save_trade(signal):
             signal["symbol"],
             signal["direction"]
         ):
+
             print(f"[DB] Đã tồn tại: {signal['symbol']}")
-            return
+
+            return False
 
         plan = signal["trade_plan"]
 
-        entry = (
-            float(plan["entry_low"]) +
-            float(plan["entry_high"])
-        ) / 2
+        entry_low = float(plan["entry_low"])
+        entry_high = float(plan["entry_high"])
+
+        entry = (entry_low + entry_high) / 2
 
         conn = get_connection()
+
         cur = conn.cursor()
 
         cur.execute("""
@@ -133,22 +227,49 @@ def save_trade(signal):
         INSERT INTO trades(
 
             created_at,
+
             symbol,
+
             timeframe,
+
             direction,
+
             score,
+
             entry,
+
+            entry_low,
+
+            entry_high,
+
             sl,
+
             tp1,
+
             tp2,
+
             tp3,
+
             rr,
+
             status,
-            open_price
+
+            open_price,
+
+            filled_price,
+
+            filled_time
 
         )
 
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES(
+
+            ?,?,?,?,?,?,
+            ?,?,?,?,
+            ?,?,?,?,
+            ?,?,?
+
+        )
 
         """,
 
@@ -166,6 +287,10 @@ def save_trade(signal):
 
             entry,
 
+            entry_low,
+
+            entry_high,
+
             float(plan["sl"]),
 
             float(plan["tp1"]),
@@ -176,30 +301,39 @@ def save_trade(signal):
 
             float(plan["rr"]),
 
-            "OPEN",
+            PENDING,
 
-            entry
+            None,
+
+            None,
+
+            None
 
         ))
 
         conn.commit()
 
+        conn.close()
+
         print(f"[DB] Đã lưu: {signal['symbol']}")
 
-        conn.close()
+        return True
 
     except Exception as e:
 
         print(f"[DB ERROR] {e}")
 
+        return False
+
 
 # ==================================================
-# Lệnh đang mở
+# Danh sách Pending
 # ==================================================
 
-def get_open_trades():
+def get_pending_trades():
 
     conn = get_connection()
+
     cur = conn.cursor()
 
     cur.execute("""
@@ -208,7 +342,9 @@ def get_open_trades():
 
     FROM trades
 
-    WHERE status='OPEN'
+    WHERE status='PENDING'
+
+    ORDER BY created_at ASC
 
     """)
 
@@ -220,7 +356,241 @@ def get_open_trades():
 
 
 # ==================================================
-# Đóng lệnh
+# Danh sách Open
+# ==================================================
+
+def get_open_trades():
+
+    conn = get_connection()
+
+    cur = conn.cursor()
+
+    cur.execute("""
+
+    SELECT *
+
+    FROM trades
+
+    WHERE status='OPEN'
+
+    ORDER BY created_at ASC
+
+    """)
+
+    rows = cur.fetchall()
+
+    conn.close()
+
+    return rows
+
+
+# ==================================================
+# Lấy 1 lệnh
+# ==================================================
+
+def get_trade(trade_id):
+
+    conn = get_connection()
+
+    cur = conn.cursor()
+
+    cur.execute("""
+
+    SELECT *
+
+    FROM trades
+
+    WHERE id=?
+
+    """,
+
+    (
+
+        trade_id,
+
+    ))
+
+    row = cur.fetchone()
+
+    conn.close()
+
+    return row
+# ==================================================
+# Entry Filled
+# ==================================================
+
+def mark_entry_filled(trade_id, price):
+
+    conn = get_connection()
+
+    cur = conn.cursor()
+
+    cur.execute("""
+
+    UPDATE trades
+
+    SET
+
+        status=?,
+
+        open_price=?,
+
+        filled_price=?,
+
+        filled_time=?
+
+    WHERE id=?
+
+    """,
+
+    (
+
+        OPEN,
+
+        price,
+
+        price,
+
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+
+        trade_id
+
+    ))
+
+    conn.commit()
+
+    conn.close()
+
+
+# ==================================================
+# Update TP
+# ==================================================
+
+def update_tp(trade_id, level):
+
+    conn = get_connection()
+
+    cur = conn.cursor()
+
+    field = f"tp{level}_hit"
+
+    cur.execute(
+
+        f"""
+
+        UPDATE trades
+
+        SET
+
+            {field}=1,
+
+            tp_level=?
+
+        WHERE id=?
+
+        """,
+
+        (
+
+            level,
+
+            trade_id
+
+        )
+
+    )
+
+    conn.commit()
+
+    conn.close()
+
+
+# ==================================================
+# Stop Loss
+# ==================================================
+
+def mark_stoploss(trade_id, price):
+
+    conn = get_connection()
+
+    cur = conn.cursor()
+
+    cur.execute("""
+
+    UPDATE trades
+
+    SET
+
+        status=?,
+
+        sl_hit=1,
+
+        close_price=?,
+
+        close_time=?
+
+    WHERE id=?
+
+    """,
+
+    (
+
+        STOPPED,
+
+        price,
+
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+
+        trade_id
+
+    ))
+
+    conn.commit()
+
+    conn.close()
+
+
+# ==================================================
+# Signal Expired
+# ==================================================
+
+def mark_expired(trade_id):
+
+    conn = get_connection()
+
+    cur = conn.cursor()
+
+    cur.execute("""
+
+    UPDATE trades
+
+    SET
+
+        status=?,
+
+        expired_time=?
+
+    WHERE id=?
+
+    """,
+
+    (
+
+        EXPIRED,
+
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+
+        trade_id
+
+    ))
+
+    conn.commit()
+
+    conn.close()
+
+
+# ==================================================
+# Close Trade
 # ==================================================
 
 def close_trade(
@@ -265,9 +635,7 @@ def close_trade(
 
         close_price,
 
-        datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        ),
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
 
         trade_id
 
@@ -276,8 +644,6 @@ def close_trade(
     conn.commit()
 
     conn.close()
-
-
 # ==================================================
 # Thống kê hôm nay
 # ==================================================
@@ -292,9 +658,11 @@ def today_statistics():
 
     cur.execute("""
 
-    SELECT status,
+    SELECT
 
-           COUNT(*)
+        status,
+
+        COUNT(*)
 
     FROM trades
 
@@ -304,39 +672,118 @@ def today_statistics():
 
     """,
 
-    (today + "%",)
+    (
 
-    )
+        today + "%",
+
+    ))
 
     rows = cur.fetchall()
 
     conn.close()
 
     return rows
+
+
 # ==================================================
-# Lấy 1 lệnh theo ID
+# Đếm số lệnh theo trạng thái
 # ==================================================
 
-def get_trade(trade_id):
+def count_by_status(status):
 
     conn = get_connection()
 
     cur = conn.cursor()
 
-    cur.execute("""
+    cur.execute(
 
-    SELECT *
+        """
 
-    FROM trades
+        SELECT COUNT(*)
 
-    WHERE id=?
+        FROM trades
 
-    """,
+        WHERE status=?
 
-    (trade_id,))
+        """,
+
+        (
+
+            status,
+
+        )
+
+    )
+
+    total = cur.fetchone()[0]
+
+    conn.close()
+
+    return total
+
+
+# ==================================================
+# Lấy lệnh gần nhất
+# ==================================================
+
+def get_last_trade(symbol):
+
+    conn = get_connection()
+
+    cur = conn.cursor()
+
+    cur.execute(
+
+        """
+
+        SELECT *
+
+        FROM trades
+
+        WHERE symbol=?
+
+        ORDER BY id DESC
+
+        LIMIT 1
+
+        """,
+
+        (
+
+            symbol,
+
+        )
+
+    )
 
     row = cur.fetchone()
 
     conn.close()
 
     return row
+
+
+# ==================================================
+# Xóa toàn bộ lệnh (Debug)
+# ==================================================
+
+def clear_database():
+
+    conn = get_connection()
+
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM trades")
+
+    conn.commit()
+
+    conn.close()
+
+    print("[DB] Database cleared.")
+
+
+# ==================================================
+# Khởi tạo Database khi import
+# ==================================================
+
+init_database()

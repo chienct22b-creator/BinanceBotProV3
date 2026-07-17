@@ -1,7 +1,8 @@
 """
 ====================================================
-BinanceBotPro V3.3
+BinanceBotPro V3.4.0
 Performance Engine
+Trade Lifecycle Edition
 ====================================================
 """
 
@@ -11,14 +12,27 @@ DB_NAME = "trades.db"
 
 
 # ==================================================
-# Kết nối Database
+# Trade Status
+# ==================================================
+
+PENDING = "PENDING"
+OPEN = "OPEN"
+CLOSED = "CLOSED"
+STOPPED = "STOPPED"
+EXPIRED = "EXPIRED"
+
+
+# ==================================================
+# Database Connection
 # ==================================================
 
 def get_connection():
 
     return sqlite3.connect(DB_NAME)
+
+
 # ==================================================
-# Tổng quan hiệu suất
+# Summary Statistics
 # ==================================================
 
 def summary():
@@ -29,17 +43,27 @@ def summary():
 
     cur.execute("""
 
-    SELECT
+        SELECT
 
-        COUNT(*),
+            COUNT(*),
 
-        SUM(CASE WHEN status='WIN' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN status='PENDING' THEN 1 ELSE 0 END),
 
-        SUM(CASE WHEN status='LOSS' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END),
 
-        SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END)
+            SUM(CASE WHEN status='CLOSED' THEN 1 ELSE 0 END),
 
-    FROM trades
+            SUM(CASE WHEN status='STOPPED' THEN 1 ELSE 0 END),
+
+            SUM(CASE WHEN status='EXPIRED' THEN 1 ELSE 0 END),
+
+            SUM(tp1_hit),
+
+            SUM(tp2_hit),
+
+            SUM(tp3_hit)
+
+        FROM trades
 
     """)
 
@@ -47,38 +71,32 @@ def summary():
 
     conn.close()
 
-    total = row[0] or 0
-    win = row[1] or 0
-    loss = row[2] or 0
-    open_trade = row[3] or 0
-
-    closed = win + loss
-
-    if closed == 0:
-
-        win_rate = 0
-
-    else:
-
-        win_rate = round(win * 100 / closed, 2)
-
     return {
 
-        "total": total,
+        "total": row[0] or 0,
 
-        "win": win,
+        "pending": row[1] or 0,
 
-        "loss": loss,
+        "open": row[2] or 0,
 
-        "open": open_trade,
+        "closed": row[3] or 0,
 
-        "win_rate": win_rate
+        "stopped": row[4] or 0,
+
+        "expired": row[5] or 0,
+
+        "tp1": row[6] or 0,
+
+        "tp2": row[7] or 0,
+
+        "tp3": row[8] or 0,
 
     }
-# ==================================================
-# Tổng RR
-# ==================================================
 
+
+# ==================================================
+# Total RR
+# ==================================================
 def total_rr():
 
     conn = get_connection()
@@ -87,11 +105,11 @@ def total_rr():
 
     cur.execute("""
 
-    SELECT rr,status
+        SELECT rr, status
 
-    FROM trades
+        FROM trades
 
-    WHERE status!='OPEN'
+        WHERE status IN ('CLOSED','STOPPED')
 
     """)
 
@@ -99,21 +117,23 @@ def total_rr():
 
     conn.close()
 
-    rr = 0
+    rr = 0.0
 
     for value, status in rows:
 
-        if status == "WIN":
+        if status == CLOSED:
 
-            rr += value
+            rr += float(value or 0)
 
-        elif status == "LOSS":
+        elif status == STOPPED:
 
             rr -= 1
 
     return round(rr, 2)
+
+
 # ==================================================
-# Thống kê theo từng Coin
+# Coin Statistics
 # ==================================================
 
 def coin_statistics():
@@ -124,42 +144,46 @@ def coin_statistics():
 
     cur.execute("""
 
-    SELECT
+        SELECT
 
-        symbol,
+            symbol,
 
-        COUNT(*) as total,
+            COUNT(*) as total,
 
-        SUM(CASE WHEN status='WIN' THEN 1 ELSE 0 END) as win,
+            SUM(CASE WHEN status='PENDING' THEN 1 ELSE 0 END),
 
-        SUM(CASE WHEN status='LOSS' THEN 1 ELSE 0 END) as loss,
+            SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END),
 
-        SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) as open,
+            SUM(CASE WHEN status='CLOSED' THEN 1 ELSE 0 END),
 
-        SUM(CASE WHEN tp_level=1 THEN 1 ELSE 0 END) as tp1,
+            SUM(CASE WHEN status='STOPPED' THEN 1 ELSE 0 END),
 
-        SUM(CASE WHEN tp_level=2 THEN 1 ELSE 0 END) as tp2,
+            SUM(CASE WHEN status='EXPIRED' THEN 1 ELSE 0 END),
 
-        SUM(CASE WHEN tp_level=3 THEN 1 ELSE 0 END) as tp3,
+            SUM(tp1_hit),
 
-        SUM(
-            CASE
+            SUM(tp2_hit),
 
-                WHEN status='WIN' THEN rr
+            SUM(tp3_hit),
 
-                WHEN status='LOSS' THEN -1
+            SUM(
+                CASE
 
-                ELSE 0
+                    WHEN status='CLOSED' THEN rr
 
-            END
+                    WHEN status='STOPPED' THEN -1
 
-        ) as total_rr
+                    ELSE 0
 
-    FROM trades
+                END
 
-    GROUP BY symbol
+            )
 
-    ORDER BY total DESC
+        FROM trades
+
+        GROUP BY symbol
+
+        ORDER BY total DESC
 
     """)
 
@@ -171,70 +195,66 @@ def coin_statistics():
 
     for row in rows:
 
-        symbol = row[0]
-
         total = row[1] or 0
 
-        win = row[2] or 0
+        closed = row[4] or 0
 
-        loss = row[3] or 0
+        stopped = row[5] or 0
 
-        open_trade = row[4] or 0
+        finished = closed + stopped
 
-        tp1 = row[5] or 0
-
-        tp2 = row[6] or 0
-
-        tp3 = row[7] or 0
-
-        rr = round(row[8] or 0, 2)
-
-        closed = win + loss
-
-        if closed == 0:
+        if finished == 0:
 
             win_rate = 0
 
         else:
 
-            win_rate = round(win * 100 / closed, 2)
+            win_rate = round(
+                closed * 100 / finished,
+                2
+            )
 
         data.append({
 
-            "symbol": symbol,
+            "symbol": row[0],
 
             "total": total,
 
-            "win": win,
+            "pending": row[2] or 0,
 
-            "loss": loss,
+            "open": row[3] or 0,
 
-            "open": open_trade,
+            "closed": closed,
 
-            "tp1": tp1,
+            "stopped": stopped,
 
-            "tp2": tp2,
+            "expired": row[6] or 0,
 
-            "tp3": tp3,
+            "tp1": row[7] or 0,
 
-            "rr": rr,
+            "tp2": row[8] or 0,
 
-            "win_rate": win_rate
+            "tp3": row[9] or 0,
+
+            "rr": round(row[10] or 0, 2),
+
+            "win_rate": win_rate,
 
         })
 
     return data
-# ==================================================
-# In thống kê Coin
-# ==================================================
 
+
+# ==================================================
+# Print Coin Statistics
+# ==================================================
 def print_coin_statistics():
 
     data = coin_statistics()
 
     print()
 
-    print("============= COIN PERFORMANCE =============")
+    print("============== COIN PERFORMANCE ==============")
 
     for coin in data:
 
@@ -244,21 +264,25 @@ def print_coin_statistics():
 
             f" WR:{coin['win_rate']:6}%"
 
-            f" WIN:{coin['win']:3}"
+            f" C:{coin['closed']:3}"
 
-            f" LOSS:{coin['loss']:3}"
+            f" S:{coin['stopped']:3}"
 
-            f" OPEN:{coin['open']:3}"
+            f" O:{coin['open']:3}"
+
+            f" P:{coin['pending']:3}"
 
             f" RR:{coin['rr']:6}"
 
         )
 
-    print("============================================")
+    print("==============================================")
 
     print()
+
+
 # ==================================================
-# Thống kê theo Timeframe
+# Timeframe Statistics
 # ==================================================
 
 def timeframe_statistics():
@@ -269,43 +293,47 @@ def timeframe_statistics():
 
     cur.execute("""
 
-    SELECT
+        SELECT
 
-        timeframe,
+            timeframe,
 
-        COUNT(*) as total,
+            COUNT(*) as total,
 
-        SUM(CASE WHEN status='WIN' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN status='PENDING' THEN 1 ELSE 0 END),
 
-        SUM(CASE WHEN status='LOSS' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END),
 
-        SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN status='CLOSED' THEN 1 ELSE 0 END),
 
-        SUM(CASE WHEN tp_level=1 THEN 1 ELSE 0 END),
+            SUM(CASE WHEN status='STOPPED' THEN 1 ELSE 0 END),
 
-        SUM(CASE WHEN tp_level=2 THEN 1 ELSE 0 END),
+            SUM(CASE WHEN status='EXPIRED' THEN 1 ELSE 0 END),
 
-        SUM(CASE WHEN tp_level=3 THEN 1 ELSE 0 END),
+            SUM(tp1_hit),
 
-        SUM(
+            SUM(tp2_hit),
 
-            CASE
+            SUM(tp3_hit),
 
-                WHEN status='WIN' THEN rr
+            SUM(
 
-                WHEN status='LOSS' THEN -1
+                CASE
 
-                ELSE 0
+                    WHEN status='CLOSED' THEN rr
 
-            END
+                    WHEN status='STOPPED' THEN -1
 
-        )
+                    ELSE 0
 
-    FROM trades
+                END
 
-    GROUP BY timeframe
+            )
 
-    ORDER BY timeframe
+        FROM trades
+
+        GROUP BY timeframe
+
+        ORDER BY timeframe
 
     """)
 
@@ -317,60 +345,62 @@ def timeframe_statistics():
 
     for row in rows:
 
-        timeframe = row[0]
-
         total = row[1] or 0
 
-        win = row[2] or 0
+        closed = row[4] or 0
 
-        loss = row[3] or 0
+        stopped = row[5] or 0
 
-        open_trade = row[4] or 0
+        finished = closed + stopped
 
-        tp1 = row[5] or 0
+        if finished == 0:
 
-        tp2 = row[6] or 0
-
-        tp3 = row[7] or 0
-
-        rr = round(row[8] or 0, 2)
-
-        closed = win + loss
-
-        if closed == 0:
             win_rate = 0
+
         else:
-            win_rate = round(win * 100 / closed, 2)
+
+            win_rate = round(
+
+                closed * 100 / finished,
+
+                2
+
+            )
 
         data.append({
 
-            "timeframe": timeframe,
+            "timeframe": row[0],
 
             "total": total,
 
-            "win": win,
+            "pending": row[2] or 0,
 
-            "loss": loss,
+            "open": row[3] or 0,
 
-            "open": open_trade,
+            "closed": closed,
 
-            "tp1": tp1,
+            "stopped": stopped,
 
-            "tp2": tp2,
+            "expired": row[6] or 0,
 
-            "tp3": tp3,
+            "tp1": row[7] or 0,
 
-            "rr": rr,
+            "tp2": row[8] or 0,
 
-            "win_rate": win_rate
+            "tp3": row[9] or 0,
+
+            "rr": round(row[10] or 0, 2),
+
+            "win_rate": win_rate,
 
         })
 
     return data
-# ==================================================
-# In thống kê Timeframe
-# ==================================================
 
+
+# ==================================================
+# Print Timeframe Statistics
+# ==================================================
 def print_timeframe_statistics():
 
     data = timeframe_statistics()
@@ -387,11 +417,13 @@ def print_timeframe_statistics():
 
             f" WR:{tf['win_rate']:6}%"
 
-            f" WIN:{tf['win']:3}"
+            f" C:{tf['closed']:3}"
 
-            f" LOSS:{tf['loss']:3}"
+            f" S:{tf['stopped']:3}"
 
-            f" OPEN:{tf['open']:3}"
+            f" O:{tf['open']:3}"
+
+            f" P:{tf['pending']:3}"
 
             f" RR:{tf['rr']:6}"
 
@@ -400,8 +432,10 @@ def print_timeframe_statistics():
     print("=============================================")
 
     print()
+
+
 # ==================================================
-# Báo cáo hiệu suất tổng hợp
+# Performance Report
 # ==================================================
 
 def performance_report():
@@ -412,35 +446,141 @@ def performance_report():
 
     tf_data = timeframe_statistics()
 
+    finished = s["closed"] + s["stopped"]
+
+    if finished == 0:
+
+        win_rate = 0
+
+    else:
+
+        win_rate = round(
+
+            s["closed"] * 100 / finished,
+
+            2
+
+        )
+
     text = ""
 
-    text += "📊 <b>BINANCE BOT PRO V3.3</b>\n"
+    text += "📊 <b>BINANCE BOT PRO V3.4.0</b>\n"
 
-    text += "=========================\n\n"
+    text += "━━━━━━━━━━━━━━━━━━\n\n"
 
-    text += f"📈 Total Signals : <b>{s['total']}</b>\n"
+    text += (
 
-    text += f"🟢 WIN : <b>{s['win']}</b>\n"
+        f"📨 Total Signals : <b>{s['total']}</b>\n"
 
-    text += f"🔴 LOSS : <b>{s['loss']}</b>\n"
+    )
 
-    text += f"🟡 OPEN : <b>{s['open']}</b>\n\n"
+    text += (
 
-    text += f"⭐ Win Rate : <b>{s['win_rate']}%</b>\n"
+        f"🟡 Pending : <b>{s['pending']}</b>\n"
 
-    text += f"💰 Total RR : <b>{rr}R</b>\n\n"
+    )
 
-    text += "📈 <b>TIMEFRAME</b>\n"
+    text += (
 
+        f"🟢 Open : <b>{s['open']}</b>\n"
+
+    )
+
+    text += (
+
+        f"🏆 Closed : <b>{s['closed']}</b>\n"
+
+    )
+
+    text += (
+
+        f"🛑 Stopped : <b>{s['stopped']}</b>\n"
+
+    )
+
+    text += (
+
+        f"⌛ Expired : <b>{s['expired']}</b>\n\n"
+
+    )
+
+    text += (
+
+        f"🎯 TP1 : <b>{s['tp1']}</b>\n"
+
+    )
+
+    text += (
+
+        f"🎯 TP2 : <b>{s['tp2']}</b>\n"
+
+    )
+
+    text += (
+
+        f"🎯 TP3 : <b>{s['tp3']}</b>\n\n"
+
+    )
+
+    text += (
+
+        f"⭐ Win Rate : <b>{win_rate}%</b>\n"
+
+    )
+
+    text += (
+
+        f"💰 Total RR : <b>{rr}R</b>\n\n"
+
+    )
+
+    text += "📈 <b>TIMEFRAME PERFORMANCE</b>\n"
     for tf in tf_data:
 
         text += (
-            f"\n{tf['timeframe']} | "
-            f"WR {tf['win_rate']}% | "
-            f"W:{tf['win']} "
-            f"L:{tf['loss']} "
-            f"O:{tf['open']} "
-            f"RR:{tf['rr']}R"
+
+            f"\n<b>{tf['timeframe']}</b>\n"
+
+        )
+
+        text += (
+
+            f"🏆 Closed : {tf['closed']} | "
+
+            f"🛑 Stopped : {tf['stopped']}\n"
+
+        )
+
+        text += (
+
+            f"🟢 Open : {tf['open']} | "
+
+            f"🟡 Pending : {tf['pending']}\n"
+
+        )
+
+        text += (
+
+            f"🎯 TP1:{tf['tp1']}  "
+
+            f"TP2:{tf['tp2']}  "
+
+            f"TP3:{tf['tp3']}\n"
+
+        )
+
+        text += (
+
+            f"⭐ WR : {tf['win_rate']}%"
+
+            f" | 💰 RR : {tf['rr']}R\n"
+
+        )
+
+        text += (
+
+            "━━━━━━━━━━━━━━━━━━"
+
         )
 
     return text

@@ -8,7 +8,7 @@ from database import init_database
 from scanner import scan_market
 from telegram_bot import send_signals
 from telegram_listener import check_commands
-from trade_tracker import check_open_trades
+from trade_tracker import track_trades
 from stats import send_daily_report
 
 
@@ -22,7 +22,7 @@ last_report_day = None
 def banner():
 
     print("=" * 70)
-    print("🚀 BinanceBotPro V3.3")
+    print("🚀 BinanceBotPro V3.4.0")
     print("📈 Multi-Timeframe Crypto Scanner")
     print("=" * 70)
     print(f"⏱ Scan Interval : {config.SCAN_INTERVAL}s")
@@ -43,11 +43,9 @@ def telegram_loop():
     while True:
 
         try:
-
             check_commands()
 
         except Exception as e:
-
             print(f"[Telegram] {e}")
 
         time.sleep(2)
@@ -61,11 +59,12 @@ def main():
 
     global last_report_day
 
+    # Khởi tạo database
     init_database()
 
     banner()
 
-    # Khởi động Telegram Listener
+    # Telegram Listener
     telegram_thread = threading.Thread(
         target=telegram_loop,
         daemon=True
@@ -81,15 +80,16 @@ def main():
 
             print()
             print(
-                f"[{datetime.now().strftime('%H:%M:%S')}] "
-                "Đang quét thị trường..."
+                f"[{datetime.now().strftime('%H:%M:%S')}] Đang quét thị trường..."
             )
+
+            # ===============================
+            # Scan Market
+            # ===============================
 
             results = scan_market()
 
-            print(
-                f"✅ Tìm thấy {len(results)} tín hiệu."
-            )
+            print(f"✅ Tìm thấy {len(results)} tín hiệu.")
 
             if results:
 
@@ -99,10 +99,16 @@ def main():
 
                 print("Không có tín hiệu phù hợp.")
 
-            # Theo dõi các lệnh đang mở
-            check_open_trades()
+            # ===============================
+            # Trade Tracker V3.4
+            # ===============================
 
-            # Báo cáo cuối ngày
+            track_trades()
+
+            # ===============================
+            # Daily Report
+            # ===============================
+
             now = datetime.now()
 
             if now.hour == 23 and now.minute >= 59:
@@ -117,8 +123,7 @@ def main():
 
         except KeyboardInterrupt:
 
-            print("\n🛑 Đã dừng bot.")
-
+            print("\n🛑 Bot đã dừng.")
             break
 
         except Exception as e:
@@ -128,10 +133,7 @@ def main():
         elapsed = time.time() - start
 
         print(f"⏱ Thời gian quét: {elapsed:.2f} giây")
-
-        print(
-            f"⏳ Chờ {config.SCAN_INTERVAL} giây...\n"
-        )
+        print(f"⏳ Chờ {config.SCAN_INTERVAL} giây...\n")
 
         time.sleep(config.SCAN_INTERVAL)
 
